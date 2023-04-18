@@ -1,24 +1,27 @@
 #! /usr/bin/env bash
 
 function download_carla_mainland () {
-    if ! wget https://mirrors.sustech.edu.cn/carla/carla/0.9.$n/CARLA_0.9.$n.tar.gz;
+    if [ -e CARLA_0.9.$n.tar.gz ]; then
+        echo "File exist!"
+    fi
+    if ! wget -c https://mirrors.sustech.edu.cn/carla/carla/0.9.$n/CARLA_0.9.$n.tar.gz;
         then echo "There is no version for CARLA 0.9.$n";
     else
         tar -xzf CARLA_0.9.$n.tar.gz
         echo "Finished download CARLA 0.9.$n... ==> now for additional maps"
-        cd Import && wget https://mirrors.sustech.edu.cn/carla/carla/0.9.$n/AdditionalMaps_0.9.$n.tar.gz
+        cd Import && wget -c https://mirrors.sustech.edu.cn/carla/carla/0.9.$n/AdditionalMaps_0.9.$n.tar.gz
         cd .. && bash ImportAssets.sh
         rm CARLA_0.9.$n.tar.gz Import/AdditionalMaps_0.9.$n.tar.gz
     fi
 }
 
 function download_carla () {
-    if ! wget https://carla-releases.s3.eu-west-3.amazonaws.com/Linux/CARLA_0.9.$n.tar.gz;
+    if ! wget -c https://carla-releases.s3.eu-west-3.amazonaws.com/Linux/CARLA_0.9.$n.tar.gz;
         then echo "There is no version for CARLA 0.9.$n";
     else
         tar -xzf CARLA_0.9.$n.tar.gz
         echo "Finished download CARLA 0.9.$n... ==> now for additional maps"
-        cd Import && wget https://carla-releases.s3.eu-west-3.amazonaws.com/Linux/AdditionalMaps_0.9.$n.tar.gz
+        cd Import && wget -c https://carla-releases.s3.eu-west-3.amazonaws.com/Linux/AdditionalMaps_0.9.$n.tar.gz
         cd .. && bash ImportAssets.sh
         rm CARLA_0.9.$n.tar.gz Import/AdditionalMaps_0.9.$n.tar.gz
     fi
