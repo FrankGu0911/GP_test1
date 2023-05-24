@@ -16,7 +16,7 @@ export TEAM_CONFIG=/home/frank/code/GP_test1/leaderboard/expert_code/expert.yaml
 export CHECKPOINT_ENDPOINT=${LEADERBOARD_ROOT}/results.json
 export CHALLENGE_TRACK_CODENAME=MAP
 
-export HOST=192.168.2.121
+export HOST=localhost
 
 python3 ${LEADERBOARD_ROOT}/leaderboard/leaderboard_evaluator.py \
 --host=${HOST}  \
