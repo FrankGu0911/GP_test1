@@ -131,3 +131,6 @@ dmypy.json
 # Carla
 carla/
 leaderboard/results.json
+
+# test
+train/test
