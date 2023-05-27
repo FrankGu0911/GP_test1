@@ -15,7 +15,50 @@ from .det_utils import generate_det_data
 from skimage.measure import block_reduce
 from .augmenter import augment
 
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 _logger = logging.getLogger(__name__)
+
+class Resize2FixedSize:
+    def __init__(self, size):
+        self.size = size
+
+    def __call__(self, pil_img):
+        pil_img = pil_img.resize(self.size)
+        return pil_img
+
+def create_carla_rgb_transform(
+    input_size, need_scale=True, mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD
+):
+
+    if isinstance(input_size, (tuple, list)):
+        img_size = input_size[-2:]
+    else:
+        img_size = input_size
+    tfl = []
+
+    if isinstance(input_size, (tuple, list)):
+        input_size_num = input_size[-1]
+    else:
+        input_size_num = input_size
+
+    if need_scale:
+        if input_size_num == 112:
+            tfl.append(Resize2FixedSize((170, 128)))
+        elif input_size_num == 128:
+            tfl.append(Resize2FixedSize((195, 146)))
+        elif input_size_num == 224:
+            tfl.append(Resize2FixedSize((341, 256)))
+        elif input_size_num == 256:
+            tfl.append(Resize2FixedSize((288, 288)))
+        else:
+            raise ValueError("Can't find proper crop size")
+    tfl.append(transforms.CenterCrop(img_size))
+    tfl.append(transforms.ToTensor())
+    tfl.append(transforms.Normalize(mean=torch.tensor(mean), std=torch.tensor(std)))
+
+    return transforms.Compose(tfl)
+
 
 def splat_points(point_cloud):
     # 256 x 256 grid
@@ -91,6 +134,7 @@ class CarlaMVDetDataset(BaseIODataset):
         with_lidar=False,
         multi_view=False,
         augment_prob=0.0,
+        rgb_center_transform=create_carla_rgb_transform(128,need_scale=False)
     ):
         super().__init__()
 
@@ -113,6 +157,7 @@ class CarlaMVDetDataset(BaseIODataset):
         self.augment_prob = augment_prob
         if self.augment_prob > 0:
             self.augmenter = augment(self.augment_prob)
+        self.rgb_center_transform = rgb_center_transform
         route_dirs = []
         self.route_frames = []
 
@@ -304,6 +349,8 @@ class CarlaMVDetDataset(BaseIODataset):
 
         if self.rgb_transform is not None:
             rgb_main_image = self.rgb_transform(rgb_image)
+        else:
+            rgb_main_image = rgb_image
         data["rgb"] = rgb_main_image
 
         if self.rgb_center_transform is not None:
@@ -371,6 +418,23 @@ class CarlaMVDetDataset(BaseIODataset):
         img_traj = generate_future_waypoints(measurements)
         img_traj = img_traj[:100, 40:140, None]
         img_traj = transforms.ToTensor()(img_traj)
+        reason = torch.zeros(7)
+        if len(measurements["is_vehicle_present"]) > 0:
+            reason[0] = 1
+        if len(measurements["is_bike_present"]) > 0:
+            reason[1] = 1
+        if len(measurements["is_lane_vehicle_present"]) > 0:
+            reason[2] = 1
+        if len(measurements["is_junction_vehicle_present"]) > 0:
+            reason[3] = 1
+        if len(measurements["is_pedestrian_present"]) > 0:
+            reason[4] = 1
+        if len(measurements["is_red_light_present"]) > 0:
+            reason[5] = 1
+        if len(measurements["is_stop_sign_present"]) > 0:
+            reason[6] = 1
+        should_slow = torch.tensor(measurements["should_slow"])
+        should_brake = torch.tensor(measurements["should_brake"])
 
 
         return data, (
@@ -381,4 +445,7 @@ class CarlaMVDetDataset(BaseIODataset):
             det_data,
             img_traj,
             stop_sign,
+            reason,
+            should_slow,
+            should_brake,
         )
