@@ -17,29 +17,27 @@ from .augmenter import augment
 
 _logger = logging.getLogger(__name__)
 
+def splat_points(point_cloud):
+    # 256 x 256 grid
+    pixels_per_meter = 8
+    hist_max_per_pixel = 5
+    x_meters_max = 14
+    y_meters_max = 28
+    xbins = np.linspace(
+        -2 * x_meters_max,
+        2 * x_meters_max + 1,
+        2 * x_meters_max * pixels_per_meter + 1,
+    )
+    ybins = np.linspace(-y_meters_max, 0, y_meters_max * pixels_per_meter + 1)
+    hist = np.histogramdd(point_cloud[..., :2], bins=(xbins, ybins))[0]
+    hist[hist > hist_max_per_pixel] = hist_max_per_pixel
+    overhead_splat = hist / hist_max_per_pixel
+    return overhead_splat
 
 def lidar_to_histogram_features(lidar, crop=256):
     """
     Convert LiDAR point cloud into 2-bin histogram over 256x256 grid
     """
-
-    def splat_points(point_cloud):
-        # 256 x 256 grid
-        pixels_per_meter = 8
-        hist_max_per_pixel = 5
-        x_meters_max = 14
-        y_meters_max = 28
-        xbins = np.linspace(
-            -2 * x_meters_max,
-            2 * x_meters_max + 1,
-            2 * x_meters_max * pixels_per_meter + 1,
-        )
-        ybins = np.linspace(-y_meters_max, 0, y_meters_max * pixels_per_meter + 1)
-        hist = np.histogramdd(point_cloud[..., :2], bins=(xbins, ybins))[0]
-        hist[hist > hist_max_per_pixel] = hist_max_per_pixel
-        overhead_splat = hist / hist_max_per_pixel
-        return overhead_splat
-
     below = lidar[lidar[..., 2] <= -2.0]
     above = lidar[lidar[..., 2] > -2.0]
     below_features = splat_points(below)
@@ -156,15 +154,21 @@ class CarlaMVDetDataset(BaseIODataset):
         rgb_right_image = rgb_full_image.crop((0, 1200, 800, 1800))
         '''
 
-        rgb_image = self._load_image(
-            os.path.join(route_dir, "rgb_front", "%04d.jpg" % frame_id)
+        # rgb_image = self._load_image(
+        #     os.path.join(route_dir, "rgb_front", "%04d.jpg" % frame_id)
+        # )
+        # rgb_left_image = self._load_image(
+        #     os.path.join(route_dir, "rgb_left", "%04d.jpg" % frame_id)
+        # )
+        # rgb_right_image = self._load_image(
+        #     os.path.join(route_dir, "rgb_right", "%04d.jpg" % frame_id)
+        # )
+        rgb_full_image = self._load_image(
+            os.path.join(route_dir, "rgb_full", "%04d.jpg" % frame_id)
         )
-        rgb_left_image = self._load_image(
-            os.path.join(route_dir, "rgb_left", "%04d.jpg" % frame_id)
-        )
-        rgb_right_image = self._load_image(
-            os.path.join(route_dir, "rgb_right", "%04d.jpg" % frame_id)
-        )
+        rgb_image = rgb_full_image.crop((0, 0, 800, 600))
+        rgb_left_image = rgb_full_image.crop((0, 600, 800, 1200))
+        rgb_right_image = rgb_full_image.crop((0, 1200, 800, 1800))
 
         if self.augment_prob > 0:
            rgb_image = Image.fromarray(self.augmenter(image=np.array(rgb_image)))
