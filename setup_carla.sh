@@ -44,8 +44,8 @@ elif [ "$version" == "3" ]; then
 elif [ "$version" == "4" ]; then
     n=10.1
 else
-    echo "Invalid version"
-    exit 1
+    echo "Invalid version, default 0.9.10.1"
+    n=10.1
 fi
 
 # Download CARLA 0.9.13
