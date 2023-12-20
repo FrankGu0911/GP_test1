@@ -1,11 +1,12 @@
 #carla
 numpy; python_version < '3.0'
-numpy==1.18.4; python_version >= '3.0'
+numpy==1.19.3; python_version >= '3.0'
 distro
 
 #leaderboard
+dictor
 requests
-opencv-python==4.2.0.32
+opencv-python==4.8.1.78
 pygame
 tabulate
 
@@ -30,8 +31,14 @@ einops
 gym
 h5py
 hydra-core==1.1
-torch==1.13.1
-torchaudio==0.13.1
-torchvision==0.14.1
 scikit-image
 imgaug
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.0+cu121
+torchvision==0.16.0+cu121
+torchaudio==2.1.0
+ftfy
+regex
+git+https://github.com/openai/CLIP.git
+tensorboard
+diffusers
