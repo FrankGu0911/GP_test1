@@ -33,10 +33,10 @@ h5py
 hydra-core==1.1
 scikit-image
 imgaug
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.1.0+cu121
-torchvision==0.16.0+cu121
-torchaudio==2.1.0
+--extra-index-url https://download.pytorch.org/whl/cu117
+torch==1.13.0+cu117
+torchvision==0.14.0+cu117
+torchaudio==0.13.0
 ftfy
 regex
 git+https://github.com/openai/CLIP.git
