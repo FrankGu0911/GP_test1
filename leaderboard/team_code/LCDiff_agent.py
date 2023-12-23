@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 import time
 import math
+import imp
 import carla
 from collections import deque
 from leaderboard.autoagents import autonomous_agent
@@ -11,10 +12,11 @@ import torch
 from torchvision.transforms import ToTensor, Resize, InterpolationMode, CenterCrop, Normalize, Compose
 import clip
 from diffusers import PNDMScheduler
-from models.vae import VAE
-from models.unet import UNet
-from models.gru import GRU
-from models.controlnet import ControlNet
+from team_code.models.vae import VAE
+from team_code.models.unet import UNet
+from team_code.models.gru import GRU
+from team_code.models.controlnet import ControlNet
+from team_code.LCDiff_Controller import LCDiff_Controller
 SAVE_PATH = os.environ.get("SAVE_PATH", 'eval')
 
 seg_tag = {
@@ -192,8 +194,12 @@ class RoutePlanner(object):
 class LCDiffAgent(autonomous_agent.AutonomousAgent):
     def setup(self, path_to_conf_file):
         self.track = autonomous_agent.Track.SENSORS
+        self.config = imp.load_source("MainModel", path_to_conf_file).GlobalConfig()
         self._hid = HIDPannel()
         self.step = -1
+        self.skip_frames = self.config.skip_frames
+        self.prev_control = None
+        self.prev_lidar = None
         self.wall_start = time.time()
         self.initialized = False
         # init model
@@ -205,7 +211,7 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
             Normalize([0.48145466, 0.4578275, 0.40821073], 
                       [0.26862954, 0.26130258, 0.27577711]),
         ])
-        self.diff_step = 20 # TODO: use config file
+        self.diff_step = self.config.diff_step
         # TODO: use config file
         self.vae_model = VAE(26,26).cuda()
         vae_params = torch.load('leaderboard/team_code/models/vae_model_69.pth',map_location=torch.device('cuda:0'))['model_state_dict']
@@ -228,6 +234,18 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
                         trained_betas=None
                         )
 
+        self.gru_model = GRU(with_lidar=True,with_rgb=True).cuda()
+        gru_params = torch.load('leaderboard/team_code/models/gru_model_24.pth',map_location=torch.device('cuda:0'))['model_state_dict']
+        self.gru_model.load_state_dict(gru_params)
+        self.gru_model.eval()
+
+        if self.config.with_lidar:
+            self.controlnet = ControlNet().cuda()
+            controlnet_params = torch.load('leaderboard/team_code/models/controlnet_4.pth',map_location=torch.device('cuda:0'))['model_state_dict']
+            self.controlnet.load_state_dict(controlnet_params)
+            self.controlnet.eval()
+        
+        self.controller = LCDiff_Controller(self.config)
 
     def sensors(self):
         return [
@@ -346,6 +364,10 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
             input_data['rgb'][1][150:450, 200:600, :3], cv2.COLOR_BGR2RGB)
         lidar_data = input_data['lidar'][1][:, :3]
         lidar_processed = self._lidar_2d(lidar_data)
+        if np.max(lidar_processed) < 8 and self.prev_lidar is not None:
+            lidar_processed = self.prev_lidar
+        else:
+            self.prev_lidar = lidar_processed
         gps = input_data["gps"][1][:2]
         speed = input_data["speed"][1]["speed"]
         compass = input_data["imu"][1][-1]
@@ -374,6 +396,8 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
             [next_wp[0] - pos[0], next_wp[1] - pos[1]])
         local_command_point = R.T.dot(local_command_point)
         result["target_point"] = local_command_point
+
+        # Get BEV
         image_front = ToTensor()(rgb).unsqueeze(0).cuda()
         image_left = ToTensor()(rgb_left).unsqueeze(0).cuda()
         image_right = ToTensor()(rgb_right).unsqueeze(0).cuda()
@@ -385,34 +409,58 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
                 self.clip_preprocess(image_right),
                 self.clip_preprocess(image_focus),
             ),dim=0)
-        clip_feature = self.clip_encoder.encode_image(image_full).unsqueeze(0).to(torch.float32)
+        pos_clip_feature = self.clip_encoder.encode_image(image_full).unsqueeze(0).to(torch.float32)
+        neg_clip_feature = self.clip_encoder.encode_image(torch.zeros_like(image_full)).unsqueeze(0)
+        clip_feature = torch.cat((neg_clip_feature,pos_clip_feature),dim=0).to(torch.float32)
+        clip_feature = clip_feature.to(torch.float32)
         out_vae = torch.randn(1,4,32,32).cuda()
         self.scheduler.set_timesteps(self.diff_step,device='cuda:0')
         for cur_time in self.scheduler.timesteps:
-            print("cur_time:",cur_time)
-            cur_time_in = cur_time.unsqueeze(0)
-            noise = out_vae
+            cur_time_in = torch.cat((cur_time.unsqueeze(0),cur_time.unsqueeze(0)),dim=0)
+            noise = torch.cat((out_vae,out_vae),dim=0)
             noise = self.scheduler.scale_model_input(noise, cur_time)
-            pred_noise = self.UNet_model(out_vae=noise, out_encoder=clip_feature,time=cur_time_in)
+            if self.config.with_lidar:  # ControlNet Use config file
+                lidar_in = ToTensor()(lidar_processed).unsqueeze(0).cuda()
+                lidar_in = torch.cat((lidar_in,lidar_in),dim=0)
+                out_control_down, out_control_mid = self.controlnet(noise,clip_feature,time=cur_time_in,condition=lidar_in)
+            else:
+                out_control_down, out_control_mid = None, None
+            pred_noise = self.UNet_model(out_vae=noise,
+                                out_encoder=clip_feature,time=cur_time_in,
+                                down_block_additional_residuals=out_control_down,
+                                mid_block_additional_residual=out_control_mid)
+            pred_noise = pred_noise[0] + 2 * (pred_noise[1] - pred_noise[0])
             out_vae = self.scheduler.step(pred_noise,cur_time,out_vae).prev_sample
-        result['vae'] = out_vae.copy()
+        result['vae'] = out_vae.clone()
         bev = self.vae_model.decoder(out_vae).squeeze(0)
         bev = torch.nn.functional.softmax(bev,dim=0)
         bev = torch.argmax(bev,dim=0).unsqueeze(0)
         bev = (torch.cat((bev,bev,bev))).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
         bev = cvt_rgb_seg(bev)
         bev = cv2.cvtColor(bev, cv2.COLOR_RGB2BGR)
-        result['bev'] = out_vae
+        result['bev'] = bev
+        # Get Control
+        onehot_command = torch.zeros(6,dtype=torch.float32)
+        onehot_command[result["next_command"] - 1] = 1
+        local_command_point
+        measurements = torch.cat([torch.tensor(local_command_point,dtype=torch.float32),onehot_command]).cuda()
+        pred_wp = self.gru_model(out_vae.unsqueeze(0),measurements.unsqueeze(0),
+                                 rgb_feature = pos_clip_feature,
+                                 lidar_feature=ToTensor()(lidar_processed).unsqueeze(0).cuda())
+        pred_wp = pred_wp.squeeze(0).cpu().detach().numpy()
+        result['wp'] = pred_wp
         return result
 
     @torch.no_grad()
     def run_step(self, input_data, timestamp):
         if not self.initialized:
             self._init()
+        self.step += 1
+        if self.step % self.skip_frames != 0 and self.step > 4:
+            return self.prev_control
         tick_data = self.tick(input_data)
         self._hid.run_interface(tick_data)
         control = carla.VehicleControl()
-        control.steer = 0.0
-        control.throttle = 0.0
-        control.brake = 1.0
+        control.throttle, control.brake, control.steer = self.controller.run_step(tick_data['speed'],tick_data['wp'])
+        self.prev_control = control
         return control

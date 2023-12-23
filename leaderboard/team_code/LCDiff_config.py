@@ -2,7 +2,8 @@ import os
 
 class GlobalConfig:
     """base architecture configurations"""
-    lidar = True
+    with_lidar = True
+    diff_step = 15
     # Controller
     turn_KP = 1.25
     turn_KI = 0.75
