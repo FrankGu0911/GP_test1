@@ -42,11 +42,12 @@ class LCDiff_Controller(object):
         self.stop_steps = 0
         self.forced_forward_steps = 0
 
-    def run_step(self, speed, waypoints):
+    def run_step(self, speed, waypoints, stop_reason=None):
         """
         Arguments:
             speed: current speed of the vehicle
             waypoints: waypoints to track
+            stop reason: [should_break,should_slow,junction,vehicle,bike,lane_vehicle,junction_vehicle,pedestrian,red_light]
         Returns:
             throttle: throttle signal
             brake: brake signal
@@ -67,8 +68,47 @@ class LCDiff_Controller(object):
         elif target_speed < 0.2:
             target_speed = 0
             brake = True
+        stop_str = ''
+        if stop_reason is not None:
+            if stop_reason[0] > 0.7: # stop
+                brake = True
+                target_speed = 0
+                stop_str += 'stop '
+            if stop_reason[1] > 0.7: # slow
+                brake = False
+                target_speed = 2
+                stop_str += 'slow '
+            if stop_reason[2] > 0.7: # junction
+                brake = False
+                target_speed = 2
+                stop_str += 'junction '
+            if stop_reason[3] > 0.7: # vehicle
+                brake = True
+                target_speed = 0
+                stop_str += 'vehicle '
+            if stop_reason[4] > 0.7: # bike
+                brake = True
+                target_speed = 0
+                stop_str += 'bike '
+            if stop_reason[5] > 0.7: # lane_vehicle
+                brake = True
+                target_speed = 0
+                stop_str += 'lane_vehicle '
+            if stop_reason[6] > 0.7: # junction_vehicle
+                brake = True
+                target_speed = 0
+                stop_str += 'junction_vehicle '
+            if stop_reason[7] > 0.7: # pedestrian
+                brake = True
+                target_speed = 0
+                stop_str += 'pedestrian '
+            if stop_reason[8] > 0.7: # red_light
+                brake = True
+                target_speed = 0
+                stop_str += 'red_light '
         if speed > target_speed * self.config.brake_ratio:
             brake = True
+
         delta = np.clip(target_speed - speed, 0.0, self.config.clip_delta)
         throttle = self.speed_controller.step(delta)
         throttle = np.clip(throttle, 0.0, self.config.max_throttle)
@@ -77,6 +117,8 @@ class LCDiff_Controller(object):
         if speed < 0.01:
             angle = 0
         steer = self.turn_controller.step(angle)
+        if steer > 0.2:
+            steer *= 1.25
         steer = np.clip(steer, -1.0, 1.0)
         if self.stop_steps > 1200:
             self.forced_forward_steps = 12
@@ -87,10 +129,13 @@ class LCDiff_Controller(object):
             self.forced_forward_steps -= 1
         if brake:
             brake = 1.0
+            throttle = 0.0
         else:
             brake = 0.0
-        print("waypoints: ", waypoints)
+        # print("waypoints: ", waypoints)
         print("aim: ", aim)
+        print("stop_reason: ", stop_reason)
+        print("stop_str: ", stop_str)
         print("throttle: ", throttle, "brake: ", brake, "steer: ", steer)
         return throttle, brake, steer
 

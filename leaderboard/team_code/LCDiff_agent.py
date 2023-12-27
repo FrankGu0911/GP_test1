@@ -234,8 +234,8 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
                         trained_betas=None
                         )
 
-        self.gru_model = GRU(with_lidar=True,with_rgb=True).cuda()
-        gru_params = torch.load('leaderboard/team_code/models/gru_model_24.pth',map_location=torch.device('cuda:0'))['model_state_dict']
+        self.gru_model = GRU(with_lidar=True,with_rgb=True,with_stop_reason=True).cuda()
+        gru_params = torch.load('leaderboard/team_code/models/gru_model_10.pth',map_location=torch.device('cuda:0'))['model_state_dict']
         self.gru_model.load_state_dict(gru_params)
         self.gru_model.eval()
 
@@ -364,7 +364,7 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
             input_data['rgb'][1][150:450, 200:600, :3], cv2.COLOR_BGR2RGB)
         lidar_data = input_data['lidar'][1][:, :3]
         lidar_processed = self._lidar_2d(lidar_data)
-        if np.max(lidar_processed) < 8 and self.prev_lidar is not None:
+        if np.max(lidar_processed) < 10 and self.prev_lidar is not None:
             lidar_processed = self.prev_lidar
         else:
             self.prev_lidar = lidar_processed
@@ -389,7 +389,7 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
         next_wp, next_cmd = self._route_planner.run_step(pos)
         result["next_command"] = next_cmd.value
         result['measurements'] = [pos[0], pos[1], compass, speed]
-        theta = compass + np.pi / 2
+        theta = compass 
         R = np.array([[np.cos(theta), -np.sin(theta)],
                      [np.sin(theta), np.cos(theta)]])
         local_command_point = np.array(
@@ -442,13 +442,16 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
         # Get Control
         onehot_command = torch.zeros(6,dtype=torch.float32)
         onehot_command[result["next_command"] - 1] = 1
-        local_command_point
+        print("target: ",local_command_point)
         measurements = torch.cat([torch.tensor(local_command_point,dtype=torch.float32),onehot_command]).cuda()
-        pred_wp = self.gru_model(out_vae.unsqueeze(0),measurements.unsqueeze(0),
+        pred_wp, stop_reason = self.gru_model(out_vae.unsqueeze(0),measurements.unsqueeze(0),
                                  rgb_feature = pos_clip_feature,
                                  lidar_feature=ToTensor()(lidar_processed).unsqueeze(0).cuda())
         pred_wp = pred_wp.squeeze(0).cpu().detach().numpy()
+        stop_reason = torch.nn.Sigmoid()(stop_reason)
+        stop_reason = stop_reason.squeeze(0).cpu().detach().numpy()
         result['wp'] = pred_wp
+        result['sr'] = stop_reason
         return result
 
     @torch.no_grad()
@@ -461,6 +464,6 @@ class LCDiffAgent(autonomous_agent.AutonomousAgent):
         tick_data = self.tick(input_data)
         self._hid.run_interface(tick_data)
         control = carla.VehicleControl()
-        control.throttle, control.brake, control.steer = self.controller.run_step(tick_data['speed'],tick_data['wp'])
+        control.throttle, control.brake, control.steer = self.controller.run_step(tick_data['speed'],tick_data['wp'],tick_data['sr'])
         self.prev_control = control
         return control
